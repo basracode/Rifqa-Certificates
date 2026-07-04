@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
+import { supabase } from './supabase';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
@@ -299,7 +300,11 @@ export default function App() {
 
   // Load templates and restore state from URL deep link query parameters on mount
   useEffect(() => {
-    const mergeAndSetTemplates = (publicTemplates: PredefinedTemplate[], diskTemplates: PredefinedTemplate[] = []) => {
+    const mergeAndSetTemplates = (
+      publicTemplates: PredefinedTemplate[], 
+      diskTemplates: PredefinedTemplate[] = [],
+      supabaseTemplates: PredefinedTemplate[] = []
+    ) => {
       const saved = localStorage.getItem('validated_cert_templates');
       let customTemplates: PredefinedTemplate[] = [];
       if (saved) {
@@ -322,10 +327,17 @@ export default function App() {
       
       const allCustom = [...customTemplates].filter(t => !deletedList.includes(t.id));
       const filteredDiskTemplates = diskTemplates.filter(t => !deletedList.includes(t.id));
+      const filteredSupabaseTemplates = supabaseTemplates.filter(t => !deletedList.includes(t.id));
 
       filteredDiskTemplates.forEach(dt => {
         if (!allCustom.some(c => c.id === dt.id)) {
           allCustom.push(dt);
+        }
+      });
+
+      filteredSupabaseTemplates.forEach(st => {
+        if (!allCustom.some(c => c.id === st.id)) {
+          allCustom.push(st);
         }
       });
 
@@ -334,15 +346,42 @@ export default function App() {
       return loadedTemplates;
     };
 
-    // Load templates.json and list-templates in parallel
+    const fetchSupabaseTemplates = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('certificate_templates')
+          .select('*')
+          .order('created_at', { ascending: true });
+        
+        if (error) throw error;
+        if (data) {
+          return data.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            category: t.category || undefined,
+            thumbnailClass: t.background_image_url ? 'bg-slate-50' : 'bg-stone-50',
+            backgroundStyle: t.background_style || '',
+            borderColor: t.border_color || 'transparent',
+            backgroundImageUrl: t.background_image_url || undefined,
+            elements: t.elements
+          }));
+        }
+      } catch (e) {
+        console.warn('Failed to load templates from Supabase, falling back to local files.', e);
+      }
+      return [];
+    };
+
+    // Load templates.json, list-templates and Supabase templates in parallel
     Promise.all([
       fetch('/templates.json').then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch('/api/list-templates').then(r => r.ok ? r.json() : []).catch(() => [])
+      fetch('/api/list-templates').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetchSupabaseTemplates()
     ])
-    .then(([publicTemplates, diskTemplates]) => {
+    .then(([publicTemplates, diskTemplates, supabaseTemplates]) => {
       const valPublic = Array.isArray(publicTemplates) ? publicTemplates.filter((t: any) => t.id && t.name && Array.isArray(t.elements)) : [];
       const valDisk = Array.isArray(diskTemplates) ? diskTemplates.filter((t: any) => t.id && t.name && Array.isArray(t.elements)) : [];
-      const loadedTemplates = mergeAndSetTemplates(valPublic, valDisk);
+      const loadedTemplates = mergeAndSetTemplates(valPublic, valDisk, supabaseTemplates);
       initFromUrl(loadedTemplates);
     });
   }, []);
@@ -387,7 +426,7 @@ export default function App() {
               });
 
               return {
-                id: `url-import-${index}-${Date.now()}`,
+                id: item.id || `url-import-${index}-${Date.now()}`,
                 name: String(item.name || item.Name || '').trim(),
                 email: String(item.email || item.Email || '').trim(),
                 serialNumber: serial,
@@ -432,7 +471,7 @@ export default function App() {
             });
 
             return {
-              id: `data-import-${index}-${Date.now()}`,
+              id: item.id || `data-import-${index}-${Date.now()}`,
               name: String(item.name || item.Name || '').trim(),
               email: String(item.email || item.Email || '').trim(),
               serialNumber: serial,
@@ -606,7 +645,26 @@ export default function App() {
     setSelectedTemplateId(newTmpl.id);
     toast.success(`تم حفظ القالب "${name}" في المتصفح`);
 
-    // Post to local Vite server to save in the project files
+    // Save to Supabase
+    try {
+      const { error } = await supabase
+        .from('certificate_templates')
+        .upsert({
+          id: tempId,
+          name: name,
+          category: category.trim() || null,
+          background_style: backgroundStyle,
+          border_color: borderColor,
+          background_image_url: backgroundImageUrl || null,
+          elements: elementsToSave
+        });
+      if (error) throw error;
+      toast.success(`تم حفظ القالب "${name}" في قاعدة بيانات Supabase بنجاح`);
+    } catch (err: any) {
+      console.warn('Failed to save template to Supabase:', err);
+    }
+
+    // Post to local Vite server to save in the project files (fallback / development only)
     try {
       const res = await fetch('/api/save-template', {
         method: 'POST',
@@ -668,6 +726,25 @@ export default function App() {
     saveAndSetTemplates(updated);
     toast.success('تم تحديث القالب في المتصفح');
 
+    // Update in Supabase
+    try {
+      const { error } = await supabase
+        .from('certificate_templates')
+        .upsert({
+          id,
+          name,
+          category: category || null,
+          background_style: backgroundStyle,
+          border_color: borderColor,
+          background_image_url: backgroundImageUrl || null,
+          elements: elementsToSave
+        });
+      if (error) throw error;
+      toast.success('تم تحديث القالب في قاعدة بيانات Supabase بنجاح');
+    } catch (err: any) {
+      console.warn('Failed to update template in Supabase:', err);
+    }
+
     // Update on disk
     try {
       await fetch('/api/save-template', {
@@ -719,6 +796,18 @@ export default function App() {
       }
     }
     toast.success('تم حذف القالب بنجاح');
+
+    // Delete from Supabase
+    try {
+      const { error } = await supabase
+        .from('certificate_templates')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      toast.success('تم حذف القالب من قاعدة بيانات Supabase بنجاح');
+    } catch (err: any) {
+      console.warn('Failed to delete template from Supabase:', err);
+    }
 
     // Delete from disk
     try {
@@ -1454,6 +1543,8 @@ export default function App() {
         const imgData = format === 'png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', pdfQuality);
         const fileBaseName = attendee.name.trim();
 
+        let currentPdfBlob: Blob | null = null;
+
         if (format === 'png') {
           // split standard base64 raw data URL
           const base64Content = imgData.split(',')[1];
@@ -1467,7 +1558,61 @@ export default function App() {
           });
           pdf.addImage(imgData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
           const pdfBlob = pdf.output('blob');
+          currentPdfBlob = pdfBlob;
           zip.file(`${fileBaseName}.pdf`, pdfBlob);
+        }
+
+        // Auto-upload and link to Supabase if ID is a valid database UUID
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attendee.id);
+        if (isUUID) {
+          try {
+            let pdfBlobToUpload = currentPdfBlob;
+            if (!pdfBlobToUpload) {
+              const pdfForUpload = new jsPDF({
+                orientation: 'landscape',
+                unit: 'mm',
+                format: 'a4',
+                compress: true
+              });
+              const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
+              pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
+              pdfBlobToUpload = pdfForUpload.output('blob');
+            }
+
+            const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
+            const fileName = `${attendee.id}_${cleanName}.pdf`;
+            const file = new File([pdfBlobToUpload], fileName, { type: 'application/pdf' });
+
+            const bucketName = 'cv-files';
+            const storagePath = `course-certificates/${fileName}`;
+
+            // Upload the file
+            const { error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(storagePath, file, { contentType: 'application/pdf', cacheControl: '3600', upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // Get public URL
+            const { data: pubData } = supabase.storage.from(bucketName).getPublicUrl(storagePath);
+            const publicUrl = pubData?.publicUrl;
+
+            if (publicUrl) {
+              // Update database record in course_registrations
+              const { error: dbError } = await supabase
+                .from('course_registrations')
+                .update({
+                  certificate_url: publicUrl,
+                  status: 'approved'
+                })
+                .eq('id', attendee.id);
+
+              if (dbError) throw dbError;
+              console.log(`[Supabase] Auto-uploaded and linked certificate for ${attendee.name}`);
+            }
+          } catch (supErr) {
+            console.error(`[Supabase] Auto-upload error for ${attendee.name}:`, supErr);
+          }
         }
 
         // small delay to prevent blocking the UI
