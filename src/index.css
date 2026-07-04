@@ -1,0 +1,245 @@
+@import "tailwindcss";
+
+/* ============================================================
+   CERTIFY STUDIO — Unified Design System (Soft UI / Blue-White)
+   ============================================================ */
+
+@theme {
+  /* Brand blue scale — exposed to Tailwind as both blue-* and indigo-* */
+  --color-blue-50:    #eff6ff;
+  --color-blue-100:   #dbeafe;
+  --color-blue-200:   #bfdbfe;
+  --color-blue-300:   #93c5fd;
+  --color-blue-400:   #60a5fa;
+  --color-blue-500:   #3b82f6;
+  --color-blue-600:   #2563eb;
+  --color-blue-700:   #1d4ed8;
+  --color-blue-800:   #1e40af;
+  --color-blue-900:   #1e3a8a;
+  --color-blue-950:   #172554;
+
+  --color-indigo-50:  #eff6ff;
+  --color-indigo-100: #dbeafe;
+  --color-indigo-200: #bfdbfe;
+  --color-indigo-300: #93c5fd;
+  --color-indigo-400: #60a5fa;
+  --color-indigo-500: #3b82f6;
+  --color-indigo-600: #2563eb;
+  --color-indigo-700: #1d4ed8;
+  --color-indigo-800: #1e40af;
+  --color-indigo-900: #1e3a8a;
+  --color-indigo-950: #172554;
+
+  --font-sans: 'Tajawal', 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  /* Semantic surfaces */
+  --brand:          #2563eb;
+  --brand-hover:    #1d4ed8;
+  --brand-active:   #1e40af;
+  --surface:        #f4f7fe;
+  --surface-card:   #ffffff;
+  --surface-sunken: #eef3fc;
+  --text:           #0f172a;
+  --text-muted:     #64748b;
+  --text-faint:     #94a3b8;
+  --border:         #e6edf8;
+  --border-strong:  #d3deef;
+
+  /* Semantic status */
+  --success: #10b981;
+  --error:   #ef4444;
+  --warning: #f59e0b;
+  --info:    #3b82f6;
+
+  /* Radius */
+  --radius-sm: 0.5rem;   /* 8 */
+  --radius:    0.75rem;  /* 12 */
+  --radius-lg: 1rem;     /* 16 */
+  --radius-xl: 1.5rem;   /* 24 */
+
+  /* Soft UI shadows */
+  --shadow-sm:  0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow:     0 4px 14px rgba(15, 23, 42, 0.07);
+  --shadow-lg:  0 14px 34px rgba(37, 99, 235, 0.12);
+  --shadow-brand: 0 8px 20px rgba(37, 99, 235, 0.25);
+}
+
+/* ---- Base ---- */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Global focus-visible ring — single fix for keyboard accessibility */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+  border-radius: var(--radius-sm);
+}
+
+/* Custom scrollbar (subtle, on-brand) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd9ef; border-radius: 99px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #aec5e8; background-clip: content-box; }
+
+/* ============================================================
+   COMPONENT UTILITIES
+   ============================================================ */
+@layer components {
+
+  /* ---- Cards ---- */
+  .cs-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .cs-card-pad { padding: 1.5rem; }
+  .cs-card-hover {
+    transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+  }
+  .cs-card-hover:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-3px);
+    border-color: var(--border-strong);
+  }
+
+  /* ---- Buttons ---- */
+  .cs-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.125rem;
+    border-radius: var(--radius);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .cs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .cs-btn-primary {
+    background: var(--brand);
+    color: #fff;
+    box-shadow: var(--shadow-brand);
+  }
+  .cs-btn-primary:hover:not(:disabled) { background: var(--brand-hover); transform: translateY(-1px); }
+  .cs-btn-primary:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+
+  .cs-btn-ghost {
+    background: var(--surface-sunken);
+    color: #334155;
+  }
+  .cs-btn-ghost:hover:not(:disabled) { background: #e2ebfa; color: var(--brand); }
+
+  .cs-btn-soft {
+    background: #eef3fc;
+    color: var(--brand);
+  }
+  .cs-btn-soft:hover:not(:disabled) { background: #e0eafb; }
+
+  .cs-btn-danger {
+    background: #fef2f2;
+    color: var(--error);
+  }
+  .cs-btn-danger:hover:not(:disabled) { background: #fee2e2; }
+
+  /* ---- Inputs ---- */
+  .cs-input {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    background: var(--surface-card);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    color: var(--text);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+  .cs-input::placeholder { color: var(--text-faint); }
+  .cs-input:focus {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+
+  /* ---- Labels & section titles ---- */
+  .cs-label {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 0.375rem;
+  }
+  .cs-section-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .cs-section-sub {
+    font-size: 0.6875rem;
+    color: var(--text-faint);
+  }
+
+  /* ---- Chip / badge ---- */
+  .cs-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.625rem;
+    border-radius: 99px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+@keyframes dialog-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes dialog-zoom-in {
+  from { transform: scale(0.96) translateY(8px); opacity: 0; }
+  to   { transform: scale(1) translateY(0);      opacity: 1; }
+}
+@keyframes toast-in {
+  from { transform: translateY(-16px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0) scale(1);        opacity: 1; }
+}
+@keyframes step-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.30); }
+  50%      { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);  }
+}
+
+.animate-dialog-backdrop { animation: dialog-fade-in 0.2s ease-out forwards; }
+.animate-dialog-content  { animation: dialog-zoom-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-toast-in        { animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.step-active             { animation: step-glow 2.4s ease-in-out infinite; }
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

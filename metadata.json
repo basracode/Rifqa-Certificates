@@ -1,0 +1,6 @@
+{
+  "name": "Certify Studio - صانع الشهادات",
+  "description": "نظام ذكي متكامل لتصميم وإصدار الشهادات المهنية للورش والدورات التدريبية دفعة واحدة باستخدام ملفات الإكسل مع إمكانيات تصميم كاملة وتصدير بصيغ PDF و PNG و ZIP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
