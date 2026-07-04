@@ -361,6 +361,98 @@ export default function App() {
       return;
     }
 
+    // Deep-link integration: ?import_url=URL
+    const importUrl = params.get('import_url');
+    if (importUrl) {
+      setIsUrlActive(true);
+      fetch(importUrl)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch');
+          return res.json();
+        })
+        .then(data => {
+          if (Array.isArray(data)) {
+            const compiled = data.map((item: any, index: number) => {
+              const prefix = workshop.serialPrefix || 'CERT';
+              const timestamp = Date.now().toString().slice(-4);
+              const order = (index + 1).toString().padStart(3, '0');
+              const randomHex = Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase().slice(-3);
+              const serial = `${prefix}-${timestamp}-${order}${randomHex}`;
+              
+              const customFields: Record<string, string> = {};
+              Object.keys(item).forEach(key => {
+                if (key.toLowerCase() !== 'name' && key.toLowerCase() !== 'email') {
+                  customFields[key] = String(item[key]);
+                }
+              });
+
+              return {
+                id: `url-import-${index}-${Date.now()}`,
+                name: String(item.name || item.Name || '').trim(),
+                email: String(item.email || item.Email || '').trim(),
+                serialNumber: serial,
+                certificateId: serial,
+                customFields
+              };
+            }).filter(att => att.name.length > 0);
+
+            if (compiled.length > 0) {
+              setAttendees(compiled);
+              toast.success(`تم استيراد ${compiled.length} اسم بنجاح من الرابط الخارجي!`);
+              setCurrentStep(2);
+            }
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          toast.error('فشل استيراد الأسماء من الرابط الخارجي. يرجى التحقق من قيود CORS.');
+        });
+    }
+
+    // Deep-link integration: ?import_data=BASE64_JSON
+    const importDataParam = params.get('import_data');
+    if (importDataParam) {
+      setIsUrlActive(true);
+      try {
+        const decoded = decodeURIComponent(escape(atob(importDataParam)));
+        const parsed = JSON.parse(decoded);
+        if (Array.isArray(parsed)) {
+          const compiled = parsed.map((item: any, index: number) => {
+            const prefix = workshop.serialPrefix || 'CERT';
+            const timestamp = Date.now().toString().slice(-4);
+            const order = (index + 1).toString().padStart(3, '0');
+            const randomHex = Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase().slice(-3);
+            const serial = `${prefix}-${timestamp}-${order}${randomHex}`;
+            
+            const customFields: Record<string, string> = {};
+            Object.keys(item).forEach(key => {
+              if (key.toLowerCase() !== 'name' && key.toLowerCase() !== 'email') {
+                customFields[key] = String(item[key]);
+              }
+            });
+
+            return {
+              id: `data-import-${index}-${Date.now()}`,
+              name: String(item.name || item.Name || '').trim(),
+              email: String(item.email || item.Email || '').trim(),
+              serialNumber: serial,
+              certificateId: serial,
+              customFields
+            };
+          }).filter(att => att.name.length > 0);
+
+          if (compiled.length > 0) {
+            setAttendees(compiled);
+            toast.success(`تم استيراد ${compiled.length} اسم بنجاح!`);
+            setCurrentStep(2);
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing import_data:', err);
+        toast.error('فشل فك تشفير البيانات المرسلة.');
+      }
+    }
+
     const hasParams = params.has('step') || params.has('type') || params.has('template');
 
     if (hasParams) {
