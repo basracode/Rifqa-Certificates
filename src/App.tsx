@@ -156,7 +156,8 @@ import {
   X,
   Sliders,
   Check,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 
 interface DialogConfig {
@@ -288,6 +289,11 @@ export default function App() {
   const [exportType, setExportType] = useState<'pdf' | 'png'>('pdf');
   const [isUrlActive, setIsUrlActive] = useState(false);
 
+  // Auto-run status for background sync (direct page-load invocation)
+  const [autoStatus, setAutoStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
+  const [autoProgress, setAutoProgress] = useState({ current: 0, total: 0 });
+  const hasAutoRun = useRef(false);
+
   // PDF quality and size settings state
   const [pdfScale, setPdfScale] = useState<number>(2.0); // Default to High (2.0x) instead of 3.0x for balanced size
   const [pdfQuality, setPdfQuality] = useState<number>(0.92); // Default JPEG quality
@@ -329,19 +335,24 @@ export default function App() {
       const filteredDiskTemplates = diskTemplates.filter(t => !deletedList.includes(t.id));
       const filteredSupabaseTemplates = supabaseTemplates.filter(t => !deletedList.includes(t.id));
 
-      filteredDiskTemplates.forEach(dt => {
-        if (!allCustom.some(c => c.id === dt.id)) {
-          allCustom.push(dt);
-        }
-      });
+      const templatesMap = new Map<string, PredefinedTemplate>();
 
-      filteredSupabaseTemplates.forEach(st => {
-        if (!allCustom.some(c => c.id === st.id)) {
-          allCustom.push(st);
-        }
-      });
+      // 1. Add predefined templates (lowest priority)
+      PREDEFINED_TEMPLATES.forEach(t => templatesMap.set(t.id, t));
 
-      const loadedTemplates = [...PREDEFINED_TEMPLATES, ...publicTemplates, ...allCustom];
+      // 2. Add public templates (templates.json)
+      publicTemplates.forEach(t => templatesMap.set(t.id, t));
+
+      // 3. Add disk templates (Vite local dev mode templates)
+      filteredDiskTemplates.forEach(t => templatesMap.set(t.id, t));
+
+      // 4. Add localStorage custom templates (prioritizes local changes)
+      allCustom.forEach(t => templatesMap.set(t.id, t));
+
+      // 5. Add Supabase templates (highest priority for database synchronization)
+      filteredSupabaseTemplates.forEach(t => templatesMap.set(t.id, t));
+
+      const loadedTemplates = Array.from(templatesMap.values());
       setTemplates(loadedTemplates);
       return loadedTemplates;
     };
@@ -385,6 +396,90 @@ export default function App() {
       initFromUrl(loadedTemplates);
     });
   }, []);
+
+  // Trigger auto-upload when attendees and template are fully loaded
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const autoParam = params.get('auto') === 'true';
+    if (autoParam && attendees.length > 0 && selectedTemplateId && !hasAutoRun.current) {
+      hasAutoRun.current = true;
+      runAutoUpload();
+    }
+  }, [attendees, selectedTemplateId]);
+
+  const runAutoUpload = async () => {
+    setAutoStatus('running');
+    setAutoProgress({ current: 0, total: attendees.length });
+
+    try {
+      for (let i = 0; i < attendees.length; i++) {
+        const attendee = attendees[i];
+        setAutoProgress({ current: i + 1, total: attendees.length });
+
+        // Render the single certificate canvas
+        const canvas = await renderSingleCertificate(attendee);
+        
+        // Auto-upload and link to Supabase if ID is a valid database UUID
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attendee.id);
+        if (isUUID) {
+          const pdfForUpload = new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a4',
+            compress: true
+          });
+          const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
+          pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
+          const pdfBlobToUpload = pdfForUpload.output('blob');
+
+          const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
+          const fileName = `${attendee.id}_${cleanName}.pdf`;
+          const file = new File([pdfBlobToUpload], fileName, { type: 'application/pdf' });
+
+          const bucketName = 'cv-files';
+          const storagePath = `course-certificates/${fileName}`;
+
+          // Upload the file
+          const { error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(storagePath, file, { contentType: 'application/pdf', cacheControl: '3600', upsert: true });
+
+          if (uploadError) throw uploadError;
+
+          // Get public URL
+          const { data: pubData } = supabase.storage.from(bucketName).getPublicUrl(storagePath);
+          const publicUrl = pubData?.publicUrl;
+
+          if (publicUrl) {
+            // Update database record in course_registrations
+            const { error: dbError } = await supabase
+              .from('course_registrations')
+              .update({
+                certificate_url: publicUrl,
+                status: 'approved'
+              })
+              .eq('id', attendee.id);
+
+            if (dbError) throw dbError;
+          }
+        }
+
+        // small delay to prevent blocking the UI
+        await new Promise(r => setTimeout(r, 60));
+      }
+
+      // Success
+      confetti({
+        particleCount: 150,
+        spread: 100,
+        origin: { y: 0.5 }
+      });
+      setAutoStatus('success');
+    } catch (err) {
+      console.error('Auto upload failed:', err);
+      setAutoStatus('error');
+    }
+  };
 
   const initFromUrl = (loadedTemplates: PredefinedTemplate[]) => {
     // Deep linking parse on mount
@@ -1720,7 +1815,7 @@ export default function App() {
         origin: { y: 0.5 }
       });
 
-      await customAlert(`تم إصدار ورفع ${successCount} شهادة بنجاح إلى حسابات الطلاب في Supabase!`);
+      await customAlert(`تم إصدار ورفع ${successCount} شهادة بنجاح إلى حسابات الطلاب!`);
     } catch (err) {
       console.error(err);
       await customAlert('حدث خطأ أثناء الرفع التلقائي للشهادات.');
@@ -1728,6 +1823,79 @@ export default function App() {
       setIsBulkExporting(false);
     }
   };
+
+  if (autoStatus !== 'idle') {
+    return (
+      <div className="fixed inset-0 bg-slate-900 text-white flex items-center justify-center p-6 z-50 font-sans select-none" dir="rtl">
+        <div className="bg-slate-800 rounded-[2rem] border border-slate-700/60 p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
+          {autoStatus === 'running' && (
+            <>
+              <div className="w-20 h-20 bg-indigo-500/10 text-indigo-400 rounded-3xl flex items-center justify-center mx-auto animate-pulse">
+                <RefreshCw className="w-10 h-10 animate-spin" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold">جاري إصدار ورفع الشهادات للطلاب…</h3>
+                <p className="text-sm text-slate-400">يرجى عدم إغلاق الصفحة حتى اكتمال العملية تلقائياً.</p>
+              </div>
+              <div className="text-5xl font-black text-indigo-400 font-mono">
+                {Math.round((autoProgress.current / Math.max(1, autoProgress.total)) * 100)}%
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>تم التجهيز</span>
+                  <span>{autoProgress.current} من أصل {autoProgress.total}</span>
+                </div>
+                <div className="w-full bg-slate-700 h-3 rounded-full overflow-hidden">
+                  <div
+                    className="bg-indigo-500 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${(autoProgress.current / Math.max(1, autoProgress.total)) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {autoStatus === 'success' && (
+            <>
+              <div className="w-20 h-20 bg-emerald-500/10 text-emerald-400 rounded-3xl flex items-center justify-center mx-auto scale-105 transition-all">
+                <CheckCircle className="w-10 h-10 animate-bounce" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-emerald-400">تم إصدار ورفع الشهادات بنجاح!</h3>
+                <p className="text-sm text-slate-400">تلقى جميع الطلاب شهاداتهم في حساباتهم الآن.</p>
+              </div>
+              <div className="pt-2">
+                <p className="text-xs text-slate-500 bg-slate-800/50 p-3 rounded-xl border border-slate-700/30">
+                  يمكنك إغلاق هذه الصفحة أو التبويب بأمان الآن.
+                </p>
+              </div>
+            </>
+          )}
+
+          {autoStatus === 'error' && (
+            <>
+              <div className="w-20 h-20 bg-rose-500/10 text-rose-400 rounded-3xl flex items-center justify-center mx-auto">
+                <AlertCircle className="w-10 h-10" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-rose-400">فشل رفع الشهادات تلقائياً</h3>
+                <p className="text-sm text-slate-400">حدث خطأ أثناء الرفع.</p>
+              </div>
+              <button
+                onClick={() => {
+                  hasAutoRun.current = false;
+                  runAutoUpload();
+                }}
+                className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-2xl transition-all active:scale-95 cursor-pointer"
+              >
+                إعادة المحاولة
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--cs-surface,#f5f8ff)] text-slate-800 font-sans" dir="rtl">
