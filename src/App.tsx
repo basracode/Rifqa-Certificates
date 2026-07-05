@@ -1640,6 +1640,95 @@ export default function App() {
     }
   };
 
+  const uploadOnlyToSupabase = async () => {
+    if (attendees.length === 0) {
+      toast.warning('استورد قائمة الحضور أولاً');
+      return;
+    }
+
+    setIsBulkExporting(true);
+    setExportType('pdf');
+    setBulkProgress({ current: 0, total: attendees.length });
+
+    let successCount = 0;
+
+    try {
+      for (let i = 0; i < attendees.length; i++) {
+        const attendee = attendees[i];
+        setBulkProgress({ current: i + 1, total: attendees.length });
+
+        const canvas = await renderSingleCertificate(attendee);
+        
+        // Auto-upload and link to Supabase if ID is a valid database UUID
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attendee.id);
+        if (isUUID) {
+          try {
+            const pdfForUpload = new jsPDF({
+              orientation: 'landscape',
+              unit: 'mm',
+              format: 'a4',
+              compress: true
+            });
+            const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
+            pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
+            const pdfBlobToUpload = pdfForUpload.output('blob');
+
+            const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
+            const fileName = `${attendee.id}_${cleanName}.pdf`;
+            const file = new File([pdfBlobToUpload], fileName, { type: 'application/pdf' });
+
+            const bucketName = 'cv-files';
+            const storagePath = `course-certificates/${fileName}`;
+
+            // Upload the file
+            const { error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(storagePath, file, { contentType: 'application/pdf', cacheControl: '3600', upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // Get public URL
+            const { data: pubData } = supabase.storage.from(bucketName).getPublicUrl(storagePath);
+            const publicUrl = pubData?.publicUrl;
+
+            if (publicUrl) {
+              // Update database record in course_registrations
+              const { error: dbError } = await supabase
+                .from('course_registrations')
+                .update({
+                  certificate_url: publicUrl,
+                  status: 'approved'
+                })
+                .eq('id', attendee.id);
+
+              if (dbError) throw dbError;
+              successCount++;
+            }
+          } catch (supErr) {
+            console.error(`[Supabase] Auto-upload error for ${attendee.name}:`, supErr);
+          }
+        }
+
+        // small delay to prevent blocking the UI
+        await new Promise(r => setTimeout(r, 60));
+      }
+
+      // Victory celebration
+      confetti({
+        particleCount: 150,
+        spread: 100,
+        origin: { y: 0.5 }
+      });
+
+      await customAlert(`تم إصدار ورفع ${successCount} شهادة بنجاح إلى حسابات الطلاب في Supabase!`);
+    } catch (err) {
+      console.error(err);
+      await customAlert('حدث خطأ أثناء الرفع التلقائي للشهادات.');
+    } finally {
+      setIsBulkExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--cs-surface,#f5f8ff)] text-slate-800 font-sans" dir="rtl">
       
@@ -2263,6 +2352,14 @@ export default function App() {
 
                   {/* Bulk download actions column */}
                   <div className="flex flex-col gap-2.5">
+                    <button
+                      onClick={() => uploadOnlyToSupabase()}
+                      className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white text-xs font-black rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg active:scale-95 cursor-pointer"
+                      id="btn-supabase-direct-upload"
+                    >
+                      <Sparkles className="w-4 h-4 text-yellow-300 animate-pulse" />
+                      إصدار ورفع الشهادات تلقائياً للطلاب (PDF)
+                    </button>
                     <button
                       onClick={() => downloadAllAsZip('png')}
                       className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-2xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 cursor-pointer"
