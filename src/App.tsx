@@ -1754,8 +1754,8 @@ export default function App() {
             </div>
 
             <div className="space-y-1.5">
-              <h3 className="cs-section-title text-lg">جاري إصدار الشهادات…</h3>
-              <p className="text-xs text-slate-500">يتم حقن بيانات كل مشترك وتصدير المخرجات بدقة عالية.</p>
+              <h3 className="cs-section-title text-lg">جاري إصدار ورفع الشهادات…</h3>
+              <p className="text-xs text-slate-500 font-bold text-indigo-600/80 animate-pulse">يتم توليد الشهادات ورفعها تلقائياً إلى حسابات المتدربين على Supabase.</p>
             </div>
 
             {/* Big percentage */}
@@ -2251,13 +2251,13 @@ export default function App() {
                   </div>
 
                   {/* Instructions column */}
-                  <div className="space-y-1 md:border-l border-slate-100">
-                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5 text-indigo-500" />
-                      خيارات تصدير ZIP مجمعة:
+                  <div className="space-y-1.5 md:border-l border-slate-100 bg-blue-50/50 dark:bg-blue-950/20 p-4 rounded-2xl border border-blue-100/50 dark:border-blue-900/30">
+                    <h4 className="text-xs font-black text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                      الربط التلقائي بقاعدة البيانات (Supabase) نشط!
                     </h4>
-                    <p className="text-[11px] text-slate-400 leading-relaxed md:ml-4">
-                      ستحمل الصور والملفات أسماء المتدربين بالضبط (مثل: <code className="bg-slate-50 px-1 py-0.5 rounded font-mono text-[10px]">Name.png</code>) داخل مجلد ZIP لتسهيل التعرف عليها.
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed font-bold">
+                      بمجرد الضغط على أزرار التصدير أدناه، سيقوم النظام تلقائياً بتوليد الشهادات، ورفعها لـ Supabase، وربطها مباشرة بحسابات الطلاب بموقع رفقة دون أي تدخل يدوي.
                     </p>
                   </div>
 
