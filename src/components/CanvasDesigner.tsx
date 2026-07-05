@@ -15,6 +15,7 @@ import { GOOGLE_FONTS } from '../data';
 import { parseTextToHtml, parseTextToEditableHtml, htmlToMarkup } from '../utils';
 import TemplatesGallery from './TemplatesGallery';
 import CustomSelect from './CustomSelect';
+import { useToast } from './Toast';
 import {
   Type,
   Trash2,
@@ -106,6 +107,7 @@ export default function CanvasDesigner({
   customConfirm,
   customPrompt
 }: CanvasDesignerProps) {
+  const toast = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -170,7 +172,9 @@ export default function CanvasDesigner({
     commitChange();
   };
   
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [copiedElements, setCopiedElements] = useState<CertificateElement[]>([]);
+  const selectedId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'templates' | 'frame' | 'element'>('templates');
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -185,6 +189,80 @@ export default function CanvasDesigner({
   const [showCenterGuides, setShowCenterGuides] = useState(false);
   const [activeDraggingGuideId, setActiveDraggingGuideId] = useState<string | null>(null);
   const [draggingGuidePos, setDraggingGuidePos] = useState<number | null>(null);
+
+  // Smart Guides & Spacing States
+  const [smartGuides, setSmartGuides] = useState<{ type: 'vertical' | 'horizontal'; position: number }[]>([]);
+  interface DistanceGuide {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    distance: number;
+    label: string;
+  }
+  const [distanceGuides, setDistanceGuides] = useState<DistanceGuide[]>([]);
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean } | null>(null);
+
+  // Helper to measure element position/dimensions in percentage relative to container
+  const getElementRectInPercent = (el: CertificateElement) => {
+    const domEl = document.getElementById(`canvas-el-${el.id}`);
+    const container = containerRef.current;
+    if (!domEl || !container) {
+      return {
+        id: el.id,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: 6, // default fallback height
+        left: el.x - el.width / 2,
+        right: el.x + el.width / 2,
+        top: el.y - 3,
+        bottom: el.y + 3,
+        centerX: el.x,
+        centerY: el.y
+      };
+    }
+    const rect = domEl.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+    
+    const left = ((rect.left - cRect.left) / cRect.width) * 100;
+    const right = ((rect.right - cRect.left) / cRect.width) * 100;
+    const top = ((rect.top - cRect.top) / cRect.height) * 100;
+    const bottom = ((rect.bottom - cRect.top) / cRect.height) * 100;
+    const width = (rect.width / cRect.width) * 100;
+    const height = (rect.height / cRect.height) * 100;
+    const centerX = left + width / 2;
+    const centerY = top + height / 2;
+
+    return {
+      id: el.id,
+      x: el.x,
+      y: el.y,
+      width,
+      height,
+      left,
+      right,
+      top,
+      bottom,
+      centerX,
+      centerY
+    };
+  };
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const handleDocumentClick = (e: MouseEvent) => {
+      setContextMenu(null);
+    };
+
+    document.addEventListener('click', handleDocumentClick);
+    return () => {
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  }, [contextMenu]);
 
   // Auto focus element styles tab when an element is clicked
   useEffect(() => {
@@ -394,53 +472,14 @@ export default function CanvasDesigner({
       const updated = [...elements, newElem];
       setElements(updated);
       pushToHistory(updated);
-      setSelectedId(newElem.id);
+      setSelectedIds([newElem.id]);
       if (onSignatureAdded) {
         onSignatureAdded();
       }
     }
   }, [savedSignature, onSignatureAdded]);
 
-  // Listen to arrow keys and delete key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!selectedId) return;
 
-      const activeElement = document.activeElement;
-      // If of type input/textarea, do not intercept
-      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'SELECT')) {
-        return;
-      }
-
-      const target = elements.find(el => el.id === selectedId);
-      if (!target || target.isLocked) return;
-
-      let step = e.shiftKey ? 2 : 0.5; // percentage step size
-      let update: Partial<CertificateElement> | null = null;
-
-      if (e.key === 'ArrowUp') {
-        update = { y: Math.max(0, target.y - step) };
-      } else if (e.key === 'ArrowDown') {
-        update = { y: Math.min(100, target.y + step) };
-      } else if (e.key === 'ArrowLeft') {
-        update = { x: Math.max(0, target.x - step) };
-      } else if (e.key === 'ArrowRight') {
-        update = { x: Math.min(100, target.x + step) };
-      } else if (e.key === 'Backspace' || e.key === 'Delete') {
-        e.preventDefault();
-        deleteElement(selectedId);
-        return;
-      }
-
-      if (update) {
-        e.preventDefault();
-        updateElement(selectedId, update);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, elements]);
 
   // Handle Undo/Redo actions
   const handleUndo = () => {
@@ -448,7 +487,7 @@ export default function CanvasDesigner({
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
       setElements(JSON.parse(JSON.stringify(history[newIndex])));
-      setSelectedId(null);
+      setSelectedIds([]);
     }
   };
 
@@ -457,9 +496,119 @@ export default function CanvasDesigner({
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
       setElements(JSON.parse(JSON.stringify(history[newIndex])));
-      setSelectedId(null);
+      setSelectedIds([]);
     }
   };
+
+  // Listen to key events for shortcuts (Arrow keys, Delete, Undo, Redo, Copy, Paste)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // If editing any element, do not intercept keydowns
+      if (editingId) return;
+
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.tagName === 'SELECT' ||
+          activeElement.getAttribute('contenteditable') === 'true')
+      ) {
+        return;
+      }
+
+      const isCtrl = e.ctrlKey || e.metaKey;
+
+      // 1. Undo (Ctrl+Z) / Redo (Ctrl+Y or Ctrl+Shift+Z)
+      if (isCtrl && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if (isCtrl && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      // 2. Copy (Ctrl+C)
+      if (isCtrl && e.key.toLowerCase() === 'c') {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          const toCopy = elements.filter(el => selectedIds.includes(el.id));
+          setCopiedElements(JSON.parse(JSON.stringify(toCopy)));
+          toast.success(`تم نسخ ${selectedIds.length} عنصر`);
+        }
+        return;
+      }
+
+      // 3. Paste (Ctrl+V)
+      if (isCtrl && e.key.toLowerCase() === 'v') {
+        if (copiedElements.length > 0) {
+          e.preventDefault();
+          const pasted: CertificateElement[] = copiedElements.map((el, i) => ({
+            ...el,
+            id: genElemId(el.type),
+            x: Math.min(100, el.x + 3),
+            y: Math.min(100, el.y + 3)
+          }));
+          const updated = [...elements, ...pasted];
+          setElements(updated);
+          pushToHistory(updated);
+          setSelectedIds(pasted.map(p => p.id));
+          toast.success(`تم لصق ${pasted.length} عنصر`);
+        }
+        return;
+      }
+
+      // 5. Backspace / Delete
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          deleteSelectedElements();
+        }
+        return;
+      }
+
+      // 6. Arrow Keys for nudging element positions
+      let step = e.shiftKey ? 2 : 0.5; // percentage step size
+      let dx = 0;
+      let dy = 0;
+
+      if (e.key === 'ArrowUp') {
+        dy = -step;
+      } else if (e.key === 'ArrowDown') {
+        dy = step;
+      } else if (e.key === 'ArrowLeft') {
+        dx = -step;
+      } else if (e.key === 'ArrowRight') {
+        dx = step;
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        e.preventDefault();
+        const updated = elements.map(el => {
+          if (selectedIds.includes(el.id) && !el.isLocked) {
+            return {
+              ...el,
+              x: Number(Math.max(0, Math.min(100, el.x + dx)).toFixed(2)),
+              y: Number(Math.max(0, Math.min(100, el.y + dy)).toFixed(2))
+            };
+          }
+          return el;
+        });
+        setElements(updated);
+        commitChange();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedIds, elements, history, historyIndex, copiedElements, editingId]);
 
   // Mutator operations
   const updateElement = (id: string, updates: Partial<CertificateElement>) => {
@@ -481,7 +630,7 @@ export default function CanvasDesigner({
     const filtered = elements.filter(el => el.id !== id);
     setElements(filtered);
     pushToHistory(filtered);
-    setSelectedId(null);
+    setSelectedIds(prev => prev.filter(x => x !== id));
   };
 
   const duplicateElement = (id: string) => {
@@ -499,7 +648,7 @@ export default function CanvasDesigner({
     const updated = [...elements, copy];
     setElements(updated);
     pushToHistory(updated);
-    setSelectedId(copy.id);
+    setSelectedIds([copy.id]);
   };
 
   const addTextElement = (presetText: string = 'نص جديد مزدوج القيمة') => {
@@ -525,7 +674,7 @@ export default function CanvasDesigner({
     const updated = [...elements, newEl];
     setElements(updated);
     pushToHistory(updated);
-    setSelectedId(newEl.id);
+    setSelectedIds([newEl.id]);
   };
 
   const addQrElement = async () => {
@@ -557,7 +706,7 @@ export default function CanvasDesigner({
     const updated = [...elements, newEl];
     setElements(updated);
     pushToHistory(updated);
-    setSelectedId(newEl.id);
+    setSelectedIds([newEl.id]);
   };
 
   const addBadgeElement = () => {
@@ -583,7 +732,7 @@ export default function CanvasDesigner({
     const updated = [...elements, newEl];
     setElements(updated);
     pushToHistory(updated);
-    setSelectedId(newEl.id);
+    setSelectedIds([newEl.id]);
   };
 
   const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -626,7 +775,7 @@ export default function CanvasDesigner({
       const updated = [...elements, newEl];
       setElements(updated);
       pushToHistory(updated);
-      setSelectedId(newEl.id);
+      setSelectedIds([newEl.id]);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -660,6 +809,305 @@ export default function CanvasDesigner({
     return output;
   };
 
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return; 
+    if (e.button === 2) return; // ignore right click for marquee
+
+    setEditingId(null);
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const startX = ((e.clientX - rect.left) / rect.width) * 100;
+    const startY = ((e.clientY - rect.top) / rect.height) * 100;
+
+    setMarquee({
+      startX,
+      startY,
+      currentX: startX,
+      currentY: startY,
+      active: true
+    });
+
+    const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (!isMultiKey) {
+      setSelectedIds([]);
+    }
+
+    const handleMouseMove = (mvEv: MouseEvent) => {
+      const curX = ((mvEv.clientX - rect.left) / rect.width) * 100;
+      const curY = ((mvEv.clientY - rect.top) / rect.height) * 100;
+
+      setMarquee(prev => prev ? { ...prev, currentX: curX, currentY: curY } : null);
+
+      const minX = Math.min(startX, curX);
+      const maxX = Math.max(startX, curX);
+      const minY = Math.min(startY, curY);
+      const maxY = Math.max(startY, curY);
+
+      const insideIds = elements
+        .filter(el => el.x >= minX && el.x <= maxX && el.y >= minY && el.y <= maxY)
+        .map(el => el.id);
+
+      if (isMultiKey) {
+        setSelectedIds(prev => Array.from(new Set([...prev, ...insideIds])));
+      } else {
+        setSelectedIds(insideIds);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setMarquee(null);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const target = e.target as HTMLElement;
+    const elementDiv = target.closest('[id^="canvas-el-"]');
+    if (elementDiv) {
+      const id = elementDiv.id.replace('canvas-el-', '');
+      if (!selectedIds.includes(id)) {
+        setSelectedIds([id]);
+      }
+    }
+
+    setContextMenu({
+      x,
+      y,
+      visible: true
+    });
+  };
+
+  // Align and Distribute functions
+  const alignElements = (alignmentType: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+    if (selectedIds.length < 2) return;
+    const bounds = selectedIds
+      .map(id => {
+        const el = elements.find(item => item.id === id);
+        return el ? getElementRectInPercent(el) : null;
+      })
+      .filter(Boolean) as any[];
+
+    if (bounds.length === 0) return;
+
+    let updated = [...elements];
+    
+    if (alignmentType === 'left') {
+      const minLeft = Math.min(...bounds.map(b => b.left));
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          const b = bounds.find(x => x.id === el.id);
+          return { ...el, x: Number((minLeft + b.width / 2).toFixed(2)) };
+        }
+        return el;
+      });
+    } else if (alignmentType === 'right') {
+      const maxRight = Math.max(...bounds.map(b => b.right));
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          const b = bounds.find(x => x.id === el.id);
+          return { ...el, x: Number((maxRight - b.width / 2).toFixed(2)) };
+        }
+        return el;
+      });
+    } else if (alignmentType === 'center') {
+      const minLeft = Math.min(...bounds.map(b => b.left));
+      const maxRight = Math.max(...bounds.map(b => b.right));
+      const centerTarget = (minLeft + maxRight) / 2;
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          return { ...el, x: Number(centerTarget.toFixed(2)) };
+        }
+        return el;
+      });
+    } else if (alignmentType === 'top') {
+      const minTop = Math.min(...bounds.map(b => b.top));
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          const b = bounds.find(x => x.id === el.id);
+          return { ...el, y: Number((minTop + b.height / 2).toFixed(2)) };
+        }
+        return el;
+      });
+    } else if (alignmentType === 'bottom') {
+      const maxBottom = Math.max(...bounds.map(b => b.bottom));
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          const b = bounds.find(x => x.id === el.id);
+          return { ...el, y: Number((maxBottom - b.height / 2).toFixed(2)) };
+        }
+        return el;
+      });
+    } else if (alignmentType === 'middle') {
+      const minTop = Math.min(...bounds.map(b => b.top));
+      const maxBottom = Math.max(...bounds.map(b => b.bottom));
+      const middleTarget = (minTop + maxBottom) / 2;
+      updated = elements.map(el => {
+        if (selectedIds.includes(el.id) && !el.isLocked) {
+          return { ...el, y: Number(middleTarget.toFixed(2)) };
+        }
+        return el;
+      });
+    }
+
+    setElements(updated);
+    pushToHistory(updated);
+    setContextMenu(null);
+  };
+
+  const distributeElements = (distType: 'horizontal' | 'vertical') => {
+    if (selectedIds.length < 3) return;
+    const bounds = selectedIds
+      .map(id => {
+        const el = elements.find(item => item.id === id);
+        return el ? getElementRectInPercent(el) : null;
+      })
+      .filter(Boolean) as any[];
+
+    if (bounds.length < 3) return;
+
+    let updated = [...elements];
+
+    if (distType === 'horizontal') {
+      const sorted = [...bounds].sort((a, b) => a.centerX - b.centerX);
+      const N = sorted.length;
+      const sumWidth = sorted.reduce((sum, b) => sum + b.width, 0);
+      const totalSpan = sorted[N - 1].right - sorted[0].left;
+      const emptySpace = totalSpan - sumWidth;
+      
+      if (emptySpace > 0) {
+        const gap = emptySpace / (N - 1);
+        updated = elements.map(el => {
+          if (selectedIds.includes(el.id) && !el.isLocked) {
+            const idx = sorted.findIndex(b => b.id === el.id);
+            if (idx === 0 || idx === N - 1) return el;
+            
+            let leftVal = sorted[0].left;
+            for (let i = 0; i < idx; i++) {
+              leftVal += sorted[i].width + gap;
+            }
+            const targetX = leftVal + sorted[idx].width / 2;
+            return { ...el, x: Number(targetX.toFixed(2)) };
+          }
+          return el;
+        });
+      } else {
+        const span = sorted[N - 1].centerX - sorted[0].centerX;
+        const step = span / (N - 1);
+        updated = elements.map(el => {
+          if (selectedIds.includes(el.id) && !el.isLocked) {
+            const idx = sorted.findIndex(b => b.id === el.id);
+            const targetX = sorted[0].centerX + idx * step;
+            return { ...el, x: Number(targetX.toFixed(2)) };
+          }
+          return el;
+        });
+      }
+    } else if (distType === 'vertical') {
+      const sorted = [...bounds].sort((a, b) => a.centerY - b.centerY);
+      const N = sorted.length;
+      const sumHeight = sorted.reduce((sum, b) => sum + b.height, 0);
+      const totalSpan = sorted[N - 1].bottom - sorted[0].top;
+      const emptySpace = totalSpan - sumHeight;
+      
+      if (emptySpace > 0) {
+        const gap = emptySpace / (N - 1);
+        updated = elements.map(el => {
+          if (selectedIds.includes(el.id) && !el.isLocked) {
+            const idx = sorted.findIndex(b => b.id === el.id);
+            if (idx === 0 || idx === N - 1) return el;
+            
+            let topVal = sorted[0].top;
+            for (let i = 0; i < idx; i++) {
+              topVal += sorted[i].height + gap;
+            }
+            const targetY = topVal + sorted[idx].height / 2;
+            return { ...el, y: Number(targetY.toFixed(2)) };
+          }
+          return el;
+        });
+      } else {
+        const span = sorted[N - 1].centerY - sorted[0].centerY;
+        const step = span / (N - 1);
+        updated = elements.map(el => {
+          if (selectedIds.includes(el.id) && !el.isLocked) {
+            const idx = sorted.findIndex(b => b.id === el.id);
+            const targetY = sorted[0].centerY + idx * step;
+            return { ...el, y: Number(targetY.toFixed(2)) };
+          }
+          return el;
+        });
+      }
+    }
+
+    setElements(updated);
+    pushToHistory(updated);
+    setContextMenu(null);
+  };
+
+  const duplicateSelectedElements = () => {
+    if (selectedIds.length === 0) return;
+    const copies: CertificateElement[] = [];
+    selectedIds.forEach(id => {
+      const original = elements.find(el => el.id === id);
+      if (!original) return;
+      copies.push({
+        ...JSON.parse(JSON.stringify(original)),
+        id: genElemId(original.type),
+        x: Math.min(95, original.x + 4),
+        y: Math.min(95, original.y + 4),
+        isLocked: false
+      });
+    });
+
+    const updated = [...elements, ...copies];
+    setElements(updated);
+    pushToHistory(updated);
+    setSelectedIds(copies.map(c => c.id));
+    setContextMenu(null);
+  };
+
+  const deleteSelectedElements = () => {
+    if (selectedIds.length === 0) return;
+    const filtered = elements.filter(el => !selectedIds.includes(el.id));
+    setElements(filtered);
+    pushToHistory(filtered);
+    setSelectedIds([]);
+    setContextMenu(null);
+  };
+
+  const toggleLockSelectedElements = () => {
+    if (selectedIds.length === 0) return;
+    const anyUnlocked = selectedIds.some(id => !elements.find(el => el.id === id)?.isLocked);
+    const updated = elements.map(el => {
+      if (selectedIds.includes(el.id)) {
+        return { ...el, isLocked: anyUnlocked };
+      }
+      return el;
+    });
+    setElements(updated);
+    pushToHistory(updated);
+    setContextMenu(null);
+  };
+
+  const selectAllElements = () => {
+    setSelectedIds(elements.map(el => el.id));
+    setContextMenu(null);
+  };
+
   // Drag handles logic relative to container box
   const handleElementMouseDown = (e: React.MouseEvent, id: string) => {
     const now = Date.now();
@@ -669,19 +1117,31 @@ export default function CanvasDesigner({
     const elStyle = elements.find(el => el.id === id);
     if (!elStyle) return;
 
-    // We can select the element regardless of lock status
-    setSelectedId(id);
     e.stopPropagation();
 
-    // If it's locked, we prevent moving/dragging, but selection is successful
+    const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
+    let newSelectedIds = [...selectedIds];
+    
+    if (isMultiKey) {
+      if (newSelectedIds.includes(id)) {
+        newSelectedIds = newSelectedIds.filter(x => x !== id);
+      } else {
+        newSelectedIds.push(id);
+      }
+      setSelectedIds(newSelectedIds);
+    } else {
+      if (!newSelectedIds.includes(id)) {
+        newSelectedIds = [id];
+        setSelectedIds(newSelectedIds);
+      }
+    }
+
     if (elStyle.isLocked) {
       return;
     }
 
-    // If this looks like the second click of a double-click on a text element,
-    // skip drag setup so React state updates don't interfere with editing entry
     if (prev && prev.id === id && (now - prev.time) < 450 && elStyle.type === 'text') {
-      return; // onDoubleClick on the inner div will handle setEditingId
+      return; 
     }
 
     e.preventDefault();
@@ -691,66 +1151,241 @@ export default function CanvasDesigner({
 
     const rect = container.getBoundingClientRect();
     
-    // Calculate initial offset in percent
     const mouseXPercent = ((e.clientX - rect.left) / rect.width) * 100;
     const mouseYPercent = ((e.clientY - rect.top) / rect.height) * 100;
 
-    setDragOffset({
-      x: mouseXPercent - elStyle.x,
-      y: mouseYPercent - elStyle.y
+    const draggableIds = newSelectedIds.filter(selId => {
+      const el = elements.find(x => x.id === selId);
+      return el && !el.isLocked;
     });
 
+    const initialPositions = draggableIds.map(selId => {
+      const el = elements.find(x => x.id === selId)!;
+      return { id: selId, x: el.x, y: el.y };
+    });
+
+    const primaryInitial = initialPositions.find(p => p.id === id) || { x: elStyle.x, y: elStyle.y };
+
     setIsDragging(true);
+    let hasDragged = false;
 
     const handleMouseMove = (mvEv: MouseEvent) => {
-      const curX = ((mvEv.clientX - rect.left) / rect.width) * 100;
-      const curY = ((mvEv.clientY - rect.top) / rect.height) * 100;
+      hasDragged = true;
+      const curMouseX = ((mvEv.clientX - rect.left) / rect.width) * 100;
+      const curMouseY = ((mvEv.clientY - rect.top) / rect.height) * 100;
 
-      let boundedX = curX - (mouseXPercent - elStyle.x);
-      let boundedY = curY - (mouseYPercent - elStyle.y);
+      const dx = curMouseX - mouseXPercent;
+      const dy = curMouseY - mouseYPercent;
 
-      // Snap logic!
-      const SNAP_THRESHOLD = 1.5; // percentage snap radius
-      
-      // 1. Snap to custom guides
-      guides.forEach(guide => {
-        if (guide.type === 'vertical') {
-          if (Math.abs(boundedX - guide.position) < SNAP_THRESHOLD) {
-            boundedX = guide.position;
-          }
-        } else {
-          if (Math.abs(boundedY - guide.position) < SNAP_THRESHOLD) {
-            boundedY = guide.position;
-          }
+      const hypotheticalX = primaryInitial.x + dx;
+      const hypotheticalY = primaryInitial.y + dy;
+
+      const targets = elements.filter(el => !newSelectedIds.includes(el.id));
+      const targetRects = targets.map(t => getElementRectInPercent(t));
+
+      const draggedRect = getElementRectInPercent(elStyle);
+      const hWidth = draggedRect.width;
+      const hHeight = draggedRect.height;
+      const hLeft = hypotheticalX - hWidth / 2;
+      const hRight = hypotheticalX + hWidth / 2;
+      const hCenterX = hypotheticalX;
+      const hTop = hypotheticalY - hHeight / 2;
+      const hBottom = hypotheticalY + hHeight / 2;
+      const hCenterY = hypotheticalY;
+
+      // Snapping
+      const SNAP_THRESHOLD = 1.2; 
+      let snappedX = hypotheticalX;
+      let snappedY = hypotheticalY;
+      let activeGuides: { type: 'vertical' | 'horizontal'; position: number }[] = [];
+
+      let snappedXFlag = false;
+
+      // Check custom manual guides first
+      guides.filter(g => g.type === 'vertical').forEach(guide => {
+        if (Math.abs(hCenterX - guide.position) < SNAP_THRESHOLD) {
+          snappedX = guide.position;
+          activeGuides.push({ type: 'vertical', position: guide.position });
+          snappedXFlag = true;
+        } else if (Math.abs(hLeft - guide.position) < SNAP_THRESHOLD) {
+          snappedX = guide.position + hWidth / 2;
+          activeGuides.push({ type: 'vertical', position: guide.position });
+          snappedXFlag = true;
+        } else if (Math.abs(hRight - guide.position) < SNAP_THRESHOLD) {
+          snappedX = guide.position - hWidth / 2;
+          activeGuides.push({ type: 'vertical', position: guide.position });
+          snappedXFlag = true;
         }
       });
 
-      // 2. Snap to center lines if enabled
-      if (showCenterGuides) {
-        if (Math.abs(boundedX - 50) < SNAP_THRESHOLD) {
-          boundedX = 50;
-        }
-        if (Math.abs(boundedY - 50) < SNAP_THRESHOLD) {
-          boundedY = 50;
+      const xSnaps = [
+        { val: hCenterX, targetProp: 'centerX', offset: 0 },
+        { val: hLeft, targetProp: 'left', offset: hWidth / 2 },
+        { val: hRight, targetProp: 'right', offset: -hWidth / 2 }
+      ];
+
+      if (!snappedXFlag) {
+        for (const snap of xSnaps) {
+          for (const tRect of targetRects) {
+            const tValues = [tRect.left, tRect.centerX, tRect.right];
+            for (const tVal of tValues) {
+              if (Math.abs(snap.val - tVal) < SNAP_THRESHOLD) {
+                snappedX = tVal + snap.offset;
+                activeGuides.push({ type: 'vertical', position: tVal });
+                snappedXFlag = true;
+                break;
+              }
+            }
+            if (snappedXFlag) break;
+          }
+          if (snappedXFlag) break;
+
+          if (showCenterGuides && Math.abs(snap.val - 50) < SNAP_THRESHOLD) {
+            snappedX = 50 + snap.offset;
+            activeGuides.push({ type: 'vertical', position: 50 });
+            break;
+          }
         }
       }
 
-      // Lock bounds 0-100 to keep within visible boundaries
-      boundedX = Math.max(0, Math.min(100, boundedX));
-      boundedY = Math.max(0, Math.min(100, boundedY));
+      let snappedYFlag = false;
 
-      updateElement(id, {
-        x: Number(boundedX.toFixed(2)),
-        y: Number(boundedY.toFixed(2))
+      // Check custom manual guides first
+      guides.filter(g => g.type === 'horizontal').forEach(guide => {
+        if (Math.abs(hCenterY - guide.position) < SNAP_THRESHOLD) {
+          snappedY = guide.position;
+          activeGuides.push({ type: 'horizontal', position: guide.position });
+          snappedYFlag = true;
+        } else if (Math.abs(hTop - guide.position) < SNAP_THRESHOLD) {
+          snappedY = guide.position + hHeight / 2;
+          activeGuides.push({ type: 'horizontal', position: guide.position });
+          snappedYFlag = true;
+        } else if (Math.abs(hBottom - guide.position) < SNAP_THRESHOLD) {
+          snappedY = guide.position - hHeight / 2;
+          activeGuides.push({ type: 'horizontal', position: guide.position });
+          snappedYFlag = true;
+        }
       });
+
+      const ySnaps = [
+        { val: hCenterY, targetProp: 'centerY', offset: 0 },
+        { val: hTop, targetProp: 'top', offset: hHeight / 2 },
+        { val: hBottom, targetProp: 'bottom', offset: -hHeight / 2 }
+      ];
+
+      if (!snappedYFlag) {
+        for (const snap of ySnaps) {
+          for (const tRect of targetRects) {
+            const tValues = [tRect.top, tRect.centerY, tRect.bottom];
+            for (const tVal of tValues) {
+              if (Math.abs(snap.val - tVal) < SNAP_THRESHOLD) {
+                snappedY = tVal + snap.offset;
+                activeGuides.push({ type: 'horizontal', position: tVal });
+                snappedYFlag = true;
+                break;
+              }
+            }
+            if (snappedYFlag) break;
+          }
+          if (snappedYFlag) break;
+
+          if (showCenterGuides && Math.abs(snap.val - 50) < SNAP_THRESHOLD) {
+            snappedY = 50 + snap.offset;
+            activeGuides.push({ type: 'horizontal', position: 50 });
+            break;
+          }
+        }
+      }
+
+      setSmartGuides(activeGuides);
+
+      // Compute distances
+      const computedDistances: DistanceGuide[] = [];
+      const cWidth = rect.width;
+      const cHeight = rect.height;
+
+      // 1. Left target
+      const leftTargets = targetRects.filter(t => t.right <= hLeft && Math.max(t.top, hTop) < Math.min(t.bottom, hBottom));
+      if (leftTargets.length > 0) {
+        const leftTarget = leftTargets.reduce((max, t) => t.right > max.right ? t : max, leftTargets[0]);
+        const gapX = hLeft - leftTarget.right;
+        if (gapX > 0 && gapX < 25) {
+          const lineY = (Math.max(leftTarget.top, hTop) + Math.min(leftTarget.bottom, hBottom)) / 2;
+          const px = Math.round((gapX / 100) * cWidth);
+          computedDistances.push({ x1: leftTarget.right, y1: lineY, x2: hLeft, y2: lineY, distance: px, label: `${px}px` });
+        }
+      }
+
+      // 2. Right target
+      const rightTargets = targetRects.filter(t => t.left >= hRight && Math.max(t.top, hTop) < Math.min(t.bottom, hBottom));
+      if (rightTargets.length > 0) {
+        const rightTarget = rightTargets.reduce((min, t) => t.left < min.left ? t : min, rightTargets[0]);
+        const gapX = rightTarget.left - hRight;
+        if (gapX > 0 && gapX < 25) {
+          const lineY = (Math.max(rightTarget.top, hTop) + Math.min(rightTarget.bottom, hBottom)) / 2;
+          const px = Math.round((gapX / 100) * cWidth);
+          computedDistances.push({ x1: hRight, y1: lineY, x2: rightTarget.left, y2: lineY, distance: px, label: `${px}px` });
+        }
+      }
+
+      // 3. Top target
+      const topTargets = targetRects.filter(t => t.bottom <= hTop && Math.max(t.left, hLeft) < Math.min(t.right, hRight));
+      if (topTargets.length > 0) {
+        const topTarget = topTargets.reduce((max, t) => t.bottom > max.bottom ? t : max, topTargets[0]);
+        const gapY = hTop - topTarget.bottom;
+        if (gapY > 0 && gapY < 25) {
+          const lineX = (Math.max(topTarget.left, hLeft) + Math.min(topTarget.right, hRight)) / 2;
+          const px = Math.round((gapY / 100) * cHeight);
+          computedDistances.push({ x1: lineX, y1: topTarget.bottom, x2: lineX, y2: hTop, distance: px, label: `${px}px` });
+        }
+      }
+
+      // 4. Bottom target
+      const bottomTargets = targetRects.filter(t => t.top >= hBottom && Math.max(t.left, hLeft) < Math.min(t.right, hRight));
+      if (bottomTargets.length > 0) {
+        const bottomTarget = bottomTargets.reduce((min, t) => t.top < min.top ? t : min, bottomTargets[0]);
+        const gapY = bottomTarget.top - hBottom;
+        if (gapY > 0 && gapY < 25) {
+          const lineX = (Math.max(bottomTarget.left, hLeft) + Math.min(bottomTarget.right, hRight)) / 2;
+          const px = Math.round((gapY / 100) * cHeight);
+          computedDistances.push({ x1: lineX, y1: hBottom, x2: lineX, y2: bottomTarget.top, distance: px, label: `${px}px` });
+        }
+      }
+
+      setDistanceGuides(computedDistances);
+
+      // Snapped Delta
+      const finalDx = snappedX - primaryInitial.x;
+      const finalDy = snappedY - primaryInitial.y;
+
+      const updated = elements.map(el => {
+        const init = initialPositions.find(p => p.id === el.id);
+        if (init && !el.isLocked) {
+          return {
+            ...el,
+            x: Number(Math.max(0, Math.min(100, init.x + finalDx)).toFixed(2)),
+            y: Number(Math.max(0, Math.min(100, init.y + finalDy)).toFixed(2))
+          };
+        }
+        return el;
+      });
+      setElements(updated);
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      setSmartGuides([]);
+      setDistanceGuides([]);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-      // Push state
-      commitChange();
+
+      if (!hasDragged && !isMultiKey) {
+        setSelectedIds([id]);
+      }
+      
+      if (hasDragged) {
+        commitChange();
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -1084,23 +1719,25 @@ export default function CanvasDesigner({
               backgroundSize: 'cover',
               backgroundPosition: 'center',
             }}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setSelectedId(null);
-                setEditingId(null);
-              }
-            }}
+            onMouseDown={handleCanvasMouseDown}
+            onContextMenu={handleContextMenu}
             id="certificate-master-canvas"
           >
             {/* Elements map */}
             {elements.map((el) => {
               const parsedText = el.type === 'text' ? resolveTemplateVariables(el.content) : '';
-              const isSelected = selectedId === el.id;
+              const isSelected = selectedIds.includes(el.id);
+              const isPrimarySelected = selectedIds.length > 0 && selectedIds[selectedIds.length - 1] === el.id;
 
               return (
                 <div
                   key={el.id}
                   onMouseDown={(e) => handleElementMouseDown(e, el.id)}
+                  onContextMenu={(e) => {
+                    if (!selectedIds.includes(el.id)) {
+                      setSelectedIds([el.id]);
+                    }
+                  }}
                   onClick={(e) => e.stopPropagation()}
                   className={`absolute group ${el.isLocked ? 'cursor-default' : 'cursor-move'} ${
                     isSelected 
@@ -1121,10 +1758,32 @@ export default function CanvasDesigner({
                   {/* Selected outline decorative visualizer */}
                   {isSelected && (
                     <>
-                      <div className="absolute -top-6 right-0 bg-indigo-600 text-white px-2 py-0.5 rounded text-[10px] font-sans flex items-center gap-1">
-                        <Move className="w-3 h-3 animate-pulse" />
-                        {el.type === 'text' ? 'حقل نصي' : el.type === 'qr' ? 'رمز تحقق QR' : el.type === 'badge' ? 'شعار ذهبي' : 'توقيع مدرب'}
-                      </div>
+                      {isPrimarySelected && (
+                        <>
+                          <div className="absolute -top-6 right-0 bg-indigo-600 text-white px-2 py-0.5 rounded text-[10px] font-sans flex items-center gap-1">
+                            <Move className="w-3 h-3 animate-pulse" />
+                            {el.type === 'text' ? 'حقل نصي' : el.type === 'qr' ? 'رمز تحقق QR' : el.type === 'badge' ? 'شعار ذهبي' : 'توقيع مدرب'}
+                          </div>
+                          <div className="absolute -top-7 left-0 bg-white border border-slate-100 shadow-[0_4px_12px_rgba(15,23,42,0.12)] rounded-lg p-0.5 flex items-center gap-0.5 z-[100] scale-90 origin-top-left select-none" onMouseDown={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); duplicateElement(el.id); }}
+                              className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-all cursor-pointer"
+                              title="تكرار العنصر"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); deleteElement(el.id); }}
+                              className="p-1 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-all cursor-pointer"
+                              title="حذف العنصر"
+                            >
+                              <Trash2 className="w-3 h-3 text-red-500" />
+                            </button>
+                          </div>
+                        </>
+                      )}
                       {!el.isLocked && (
                         <>
                           {/* Left Resize Handle */}
@@ -1508,6 +2167,258 @@ export default function CanvasDesigner({
                 </div>
               );
             })}
+
+            {/* Smart Alignment Guides */}
+            {smartGuides.map((guide, idx) => {
+              const isVertical = guide.type === 'vertical';
+              return (
+                <div
+                  key={`sg-${idx}`}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: isVertical ? `${guide.position}%` : 0,
+                    top: !isVertical ? `${guide.position}%` : 0,
+                    width: isVertical ? '1.5px' : '100%',
+                    height: !isVertical ? '1.5px' : '100%',
+                    backgroundColor: '#d946ef', // magenta/purple
+                    boxShadow: '0 0 4px rgba(217, 70, 239, 0.6)',
+                    zIndex: 25
+                  }}
+                />
+              );
+            })}
+
+            {/* Distance / Spacing Guides */}
+            {distanceGuides.map((g, idx) => {
+              const isVertical = g.x1 === g.x2;
+              const lineLeft = Math.min(g.x1, g.x2);
+              const lineTop = Math.min(g.y1, g.y2);
+              const lineWidth = isVertical ? 1 : Math.abs(g.x2 - g.x1);
+              const lineHeight = !isVertical ? 1 : Math.abs(g.y2 - g.y1);
+
+              return (
+                <div key={`dg-${idx}`} className="absolute pointer-events-none" style={{ zIndex: 26 }}>
+                  {/* Spacing Line */}
+                  <div
+                    className="absolute bg-pink-500"
+                    style={{
+                      left: `${lineLeft}%`,
+                      top: `${lineTop}%`,
+                      width: isVertical ? '1.5px' : `${lineWidth}%`,
+                      height: !isVertical ? '1.5px' : `${lineHeight}%`,
+                    }}
+                  />
+                  {/* Start tick */}
+                  <div
+                    className="absolute bg-pink-500"
+                    style={{
+                      left: `${g.x1}%`,
+                      top: `${g.y1}%`,
+                      width: isVertical ? '6px' : '1.5px',
+                      height: !isVertical ? '6px' : '1.5px',
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  />
+                  {/* End tick */}
+                  <div
+                    className="absolute bg-pink-500"
+                    style={{
+                      left: `${g.x2}%`,
+                      top: `${g.y2}%`,
+                      width: isVertical ? '6px' : '1.5px',
+                      height: !isVertical ? '6px' : '1.5px',
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  />
+                  {/* Distance pill badge */}
+                  <div
+                    className="absolute bg-pink-500 text-white font-mono font-bold text-[8px] px-1 py-0.5 rounded shadow-sm whitespace-nowrap"
+                    style={{
+                      left: `${(g.x1 + g.x2) / 2}%`,
+                      top: `${(g.y1 + g.y2) / 2}%`,
+                      transform: 'translate(-50%, -50%)',
+                      padding: '1px 3px',
+                      borderRadius: '3px',
+                    }}
+                  >
+                    {g.label}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Selection Marquee Overlay */}
+            {marquee && marquee.active && (() => {
+              const minX = Math.min(marquee.startX, marquee.currentX);
+              const maxX = Math.max(marquee.startX, marquee.currentX);
+              const minY = Math.min(marquee.startY, marquee.currentY);
+              const maxY = Math.max(marquee.startY, marquee.currentY);
+              return (
+                <div
+                  className="absolute border border-dashed border-indigo-500 bg-indigo-500/15 pointer-events-none"
+                  style={{
+                    left: `${minX}%`,
+                    top: `${minY}%`,
+                    width: `${maxX - minX}%`,
+                    height: `${maxY - minY}%`,
+                    zIndex: 99
+                  }}
+                />
+              );
+            })()}
+
+            {/* Custom Right-Click Context Menu */}
+            {contextMenu && contextMenu.visible && (
+              <div
+                className="absolute bg-white/95 backdrop-blur-md border border-slate-100 text-slate-800 rounded-2xl shadow-[0_10px_30px_rgba(15,23,42,0.18)] py-2 w-64 z-[999] flex flex-col font-sans select-none animate-in fade-in zoom-in-95 duration-100"
+                style={{
+                  left: `${(contextMenu.x / (containerRef.current?.getBoundingClientRect().width || 1)) * 100}%`,
+                  top: `${(contextMenu.y / (containerRef.current?.getBoundingClientRect().height || 1)) * 100}%`,
+                  direction: 'rtl'
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {selectedIds.length >= 2 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] font-bold text-indigo-600 uppercase tracking-wider">أدوات المحاذاة</div>
+                    <div className="grid grid-cols-3 gap-1 px-2 pb-2 border-b border-slate-100">
+                      <button
+                        onClick={() => alignElements('right')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة لليمين"
+                      >
+                        <AlignRight className="w-4 h-4 text-indigo-500" />
+                        <span className="text-[9px] mt-1">يمين</span>
+                      </button>
+                      <button
+                        onClick={() => alignElements('center')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة للوسط أفقياً"
+                      >
+                        <AlignCenter className="w-4 h-4 text-indigo-500" />
+                        <span className="text-[9px] mt-1">وسط</span>
+                      </button>
+                      <button
+                        onClick={() => alignElements('left')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة لليسار"
+                      >
+                        <AlignLeft className="w-4 h-4 text-indigo-500" />
+                        <span className="text-[9px] mt-1">يسار</span>
+                      </button>
+                      <button
+                        onClick={() => alignElements('top')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة للأعلى"
+                      >
+                        <div className="rotate-90"><AlignRight className="w-4 h-4 text-indigo-500" /></div>
+                        <span className="text-[9px] mt-1">أعلى</span>
+                      </button>
+                      <button
+                        onClick={() => alignElements('middle')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة للوسط رأسياً"
+                      >
+                        <div className="rotate-90"><AlignCenter className="w-4 h-4 text-indigo-500" /></div>
+                        <span className="text-[9px] mt-1">منتصف</span>
+                      </button>
+                      <button
+                        onClick={() => alignElements('bottom')}
+                        className="flex flex-col items-center justify-center p-2 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer transition-colors"
+                        title="محاذاة للأسفل"
+                      >
+                        <div className="rotate-90"><AlignLeft className="w-4 h-4 text-indigo-500" /></div>
+                        <span className="text-[9px] mt-1">أسفل</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {selectedIds.length >= 3 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] font-bold text-indigo-600 uppercase tracking-wider mt-1">توزيع العناصر</div>
+                    <div className="flex gap-2 px-3 pb-2 border-b border-slate-100">
+                      <button
+                        onClick={() => distributeElements('horizontal')}
+                        className="flex-1 flex items-center justify-center gap-1.5 p-2 rounded-xl hover:bg-slate-50 text-slate-600 text-xs cursor-pointer transition-colors border border-slate-100"
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-500" />
+                        توزيع أفقياً
+                      </button>
+                      <button
+                        onClick={() => distributeElements('vertical')}
+                        className="flex-1 flex items-center justify-center gap-1.5 p-2 rounded-xl hover:bg-slate-50 text-slate-600 text-xs cursor-pointer transition-colors border border-slate-100"
+                      >
+                        <div className="rotate-90"><ArrowLeftRight className="w-3.5 h-3.5 text-indigo-500" /></div>
+                        توزيع رأسياً
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex flex-col p-1">
+                  {selectedIds.length > 0 ? (
+                    <>
+                      <button
+                        onClick={duplicateSelectedElements}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                        تكرار المحدد ({selectedIds.length})
+                      </button>
+                      <button
+                        onClick={toggleLockSelectedElements}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        {selectedIds.some(id => !elements.find(el => el.id === id)?.isLocked) ? (
+                          <>
+                            <Lock className="w-3.5 h-3.5 text-slate-400" />
+                            قفل العناصر المحددة
+                          </>
+                        ) : (
+                          <>
+                            <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                            إلغاء قفل العناصر
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={deleteSelectedElements}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-red-50 text-red-600 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                        حذف العناصر المحددة ({selectedIds.length})
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => { addTextElement(); setContextMenu(null); }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        <Type className="w-3.5 h-3.5 text-slate-400" />
+                        إضافة نص جديد
+                      </button>
+                      <button
+                        onClick={() => { addQrElement(); setContextMenu(null); }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        <QrCode className="w-3.5 h-3.5 text-slate-400" />
+                        إضافة رمز تحقق QR
+                      </button>
+                      <button
+                        onClick={selectAllElements}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors text-right"
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5 text-slate-400" />
+                        تحديد جميع العناصر
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1651,7 +2562,158 @@ export default function CanvasDesigner({
 
         {/* Tab 3: Selected Element properties */}
         {sidebarTab === 'element' && (
-          selectedElement ? (
+          selectedIds.length > 1 ? (
+            <div className="space-y-4" id="elem-props-widget">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5 font-sans">
+                  <LayoutGrid className="w-4 h-4 text-indigo-600 animate-pulse" />
+                  تعديل العناصر المحددة ({selectedIds.length})
+                </h4>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={duplicateSelectedElements}
+                    className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg transition-all cursor-pointer"
+                    title="تكرار العناصر"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={deleteSelectedElements}
+                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-lg transition-all cursor-pointer"
+                    title="حذف العناصر"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Alignments Grid */}
+              <div className="space-y-2">
+                <label className="text-[11px] text-slate-500 block font-sans">محاذاة سريعة للمجموعة:</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => alignElements('left')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <AlignLeft className="w-3 h-3" /> يسار
+                  </button>
+                  <button
+                    onClick={() => alignElements('center')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <AlignCenter className="w-3 h-3" /> وسط
+                  </button>
+                  <button
+                    onClick={() => alignElements('right')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <AlignRight className="w-3 h-3" /> يمين
+                  </button>
+                  <button
+                    onClick={() => alignElements('top')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <div className="rotate-90"><AlignRight className="w-3 h-3" /></div> أعلى
+                  </button>
+                  <button
+                    onClick={() => alignElements('middle')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <div className="rotate-90"><AlignCenter className="w-3 h-3" /></div> منتصف
+                  </button>
+                  <button
+                    onClick={() => alignElements('bottom')}
+                    className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                  >
+                    <div className="rotate-90"><AlignLeft className="w-3 h-3" /></div> أسفل
+                  </button>
+                </div>
+              </div>
+
+              {/* Bulk Spacing Distribution */}
+              {selectedIds.length >= 3 && (
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 block font-sans">توزيع مسافات:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => distributeElements('horizontal')}
+                      className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                    >
+                      <ArrowLeftRight className="w-3 h-3" /> توزيع أفقياً
+                    </button>
+                    <button
+                      onClick={() => distributeElements('vertical')}
+                      className="flex items-center justify-center gap-1 py-1.5 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl text-[10px] font-semibold text-slate-700 hover:text-indigo-700 transition-all cursor-pointer"
+                    >
+                      <div className="rotate-90"><ArrowLeftRight className="w-3.5 h-3.5" /></div> توزيع رأسياً
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Bulk operations */}
+              <div className="space-y-4 border-t border-slate-100 pt-4">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-500 block">تغيير حجم جميع النصوص المحددة:</label>
+                  <input
+                    type="range"
+                    min="8"
+                    max="150"
+                    defaultValue="24"
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      const updated = elements.map(el => {
+                        if (selectedIds.includes(el.id) && el.type === 'text') {
+                          return { ...el, fontSize: val };
+                        }
+                        return el;
+                      });
+                      setElements(updated);
+                    }}
+                    onMouseUp={commitChange}
+                    className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-500 block">تغيير لون العناصر المحددة:</label>
+                  <input
+                    type="color"
+                    defaultValue="#333333"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const updated = elements.map(el => {
+                        if (selectedIds.includes(el.id)) {
+                          return { ...el, color: val };
+                        }
+                        return el;
+                      });
+                      setElements(updated);
+                    }}
+                    onBlur={commitChange}
+                    className="w-8 h-8 bg-transparent border-0 rounded cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <button
+                    onClick={toggleLockSelectedElements}
+                    className="w-full py-2 rounded-xl border border-slate-200 text-[11px] text-slate-500 hover:text-slate-800 hover:bg-slate-50 flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+                  >
+                    {selectedIds.some(id => !elements.find(el => el.id === id)?.isLocked) ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5" /> قفل العناصر المحددة
+                      </>
+                    ) : (
+                      <>
+                        <Unlock className="w-3.5 h-3.5" /> إلغاء قفل العناصر
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : selectedElement ? (
             <div className="space-y-4" id="elem-props-widget">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">

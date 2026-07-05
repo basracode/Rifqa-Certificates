@@ -346,11 +346,11 @@ export default function App() {
       // 3. Add disk templates (Vite local dev mode templates)
       filteredDiskTemplates.forEach(t => templatesMap.set(t.id, t));
 
-      // 4. Add localStorage custom templates (prioritizes local changes)
-      allCustom.forEach(t => templatesMap.set(t.id, t));
-
-      // 5. Add Supabase templates (highest priority for database synchronization)
+      // 4. Add Supabase templates (highest priority for database synchronization)
       filteredSupabaseTemplates.forEach(t => templatesMap.set(t.id, t));
+
+      // 5. Add localStorage custom templates (prioritizes local changes)
+      allCustom.forEach(t => templatesMap.set(t.id, t));
 
       const loadedTemplates = Array.from(templatesMap.values());
       setTemplates(loadedTemplates);
