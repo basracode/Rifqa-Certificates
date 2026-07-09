@@ -408,6 +408,16 @@ export default function App() {
   }, [attendees, selectedTemplateId]);
 
   const runAutoUpload = async () => {
+    // Wait for the hidden render node to be mounted in the DOM (race condition on auto-run)
+    for (let wait = 0; wait < 30 && !hiddenRenderRef.current; wait++) {
+      await new Promise(res => setTimeout(res, 100));
+    }
+    if (!hiddenRenderRef.current) {
+      console.error('Auto upload failed: Render node not initialized after waiting');
+      setAutoStatus('error');
+      return;
+    }
+
     setAutoStatus('running');
     setAutoProgress({ current: 0, total: attendees.length });
 
