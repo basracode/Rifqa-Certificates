@@ -1842,7 +1842,18 @@ export default function App() {
   if (autoStatus !== 'idle') {
     return (
       <div className="fixed inset-0 bg-slate-900 text-white flex items-center justify-center p-6 z-50 font-sans select-none" dir="rtl">
+
+        {/* Hidden render node must always be in DOM for certificate generation */}
+        <div style={{ position: 'fixed', top: 0, left: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: -9999 }}>
+          <div
+            ref={hiddenRenderRef}
+            style={{ position: 'absolute', left: 0, top: 0, width: '1414px', height: '1000px', overflow: 'hidden', backgroundColor: '#ffffff' }}
+            id="hidden-canvas-hd-node"
+          />
+        </div>
+
         <div className="bg-slate-800 rounded-[2rem] border border-slate-700/60 p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
+
           {autoStatus === 'running' && (
             <>
               <div className="w-20 h-20 bg-indigo-500/10 text-indigo-400 rounded-3xl flex items-center justify-center mx-auto animate-pulse">
