@@ -1511,7 +1511,11 @@ export default function App() {
       useCORS: true,
       logging: false,
       allowTaint: false,
-      backgroundColor: null
+      backgroundColor: null,
+      // windowWidth ensures text-align:justify is calculated based on certificate width (1414px)
+      // not the browser viewport, preventing uneven spacing in exported PDF/PNG
+      windowWidth: 1414,
+      windowHeight: 1000
     });
 
     return canvas;
@@ -1843,14 +1847,12 @@ export default function App() {
     return (
       <div className="fixed inset-0 bg-slate-900 text-white flex items-center justify-center p-6 z-50 font-sans select-none" dir="rtl">
 
-        {/* Hidden render node must always be in DOM for certificate generation */}
-        <div style={{ position: 'fixed', top: 0, left: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: -9999 }}>
-          <div
-            ref={hiddenRenderRef}
-            style={{ position: 'absolute', left: 0, top: 0, width: '1414px', height: '1000px', overflow: 'hidden', backgroundColor: '#ffffff' }}
-            id="hidden-canvas-hd-node"
-          />
-        </div>
+        {/* Hidden render node — off-screen so text-align:justify computes correctly */}
+        <div
+          ref={hiddenRenderRef}
+          style={{ position: 'fixed', left: '-9999px', top: '0px', width: '1414px', height: '1000px', overflow: 'hidden', pointerEvents: 'none', zIndex: -9999, backgroundColor: '#ffffff' }}
+          id="hidden-canvas-hd-node"
+        />
 
         <div className="bg-slate-800 rounded-[2rem] border border-slate-700/60 p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
 
@@ -1926,33 +1928,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[var(--cs-surface,#f5f8ff)] text-slate-800 font-sans" dir="rtl">
       
-      {/* Dynamic Offscreen Renderer Container */}
+      {/* Dynamic Offscreen Renderer — positioned off-screen (not width:0) so text-align:justify computes correctly */}
       <div
+        ref={hiddenRenderRef}
         style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          width: 0,
-          height: 0,
+          left: '-9999px',
+          top: '0px',
+          width: '1414px',
+          height: '1000px',
           overflow: 'hidden',
           pointerEvents: 'none',
           zIndex: -9999,
+          backgroundColor: '#ffffff',
         }}
-      >
-        <div 
-          ref={hiddenRenderRef} 
-          style={{ 
-            position: 'absolute', 
-            left: 0, 
-            top: 0,
-            width: '1414px',
-            height: '1000px',
-            overflow: 'hidden',
-            backgroundColor: '#ffffff'
-          }}
-          id="hidden-canvas-hd-node"
-        />
-      </div>
+        id="hidden-canvas-hd-node"
+      />
 
       {/* Navbar — Soft UI glass */}
       <header className="bg-white/80 backdrop-blur-xl sticky top-0 z-40 border-b border-slate-100 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
