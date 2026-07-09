@@ -1408,10 +1408,8 @@ export default function App() {
         elDiv.style.letterSpacing = `${el.letterSpacing}px`;
         elDiv.style.lineHeight = '1.45';
         elDiv.style.whiteSpace = 'pre-wrap';
-        // Apply justify text alignment if selected
-        if (el.align === 'justify') {
-          elDiv.style.textAlignLast = el.align;
-        }
+        // textAlignLast is intentionally NOT set to 'justify' — that would force the last
+        // line to also be fully stretched with huge gaps. Default 'auto' leaves last line natural.
         elDiv.innerHTML = parseTextToHtml(replacePlaceholderTags(el.content, attendee));
       } 
       else if (el.type === 'qr') {
