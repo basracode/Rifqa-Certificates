@@ -1370,10 +1370,11 @@ export default function App() {
     // First, clear everything inside hiddenNode
     hiddenNode.innerHTML = '';
 
-    // Set background borders
+    // Set background borders (keep position:fixed so it stays off-screen during render)
     hiddenNode.style.width = '1414px';
     hiddenNode.style.height = '1000px';
-    hiddenNode.style.position = 'relative';
+    hiddenNode.style.left = '-9999px';
+    hiddenNode.style.top = '0px';
     hiddenNode.style.overflow = 'hidden';
     hiddenNode.style.borderColor = borderColor;
     hiddenNode.style.borderWidth = borderColor !== 'transparent' ? '17px' : '0px';
