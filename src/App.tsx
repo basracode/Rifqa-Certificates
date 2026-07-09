@@ -430,7 +430,8 @@ export default function App() {
           });
           const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
           pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
-          const pdfBlobToUpload = pdfForUpload.output('blob');
+          const arrayBuffer = pdfForUpload.output('arraybuffer');
+          const pdfBlobToUpload = new Blob([arrayBuffer], { type: 'application/pdf' });
 
           const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
           const fileName = `${attendee.id}_${cleanName}.pdf`;
@@ -1535,7 +1536,8 @@ export default function App() {
         compress: true
       });
       pdf.addImage(imageUri, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
-      const pdfBlob = pdf.output('blob');
+      const arrayBuffer = pdf.output('arraybuffer');
+      const pdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
       setEstimatedPdfSize(pdfBlob.size);
     } catch (err) {
       console.error('Error estimating PDF size:', err);
@@ -1652,7 +1654,8 @@ export default function App() {
             compress: true
           });
           pdf.addImage(imgData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
-          const pdfBlob = pdf.output('blob');
+          const arrayBuffer = pdf.output('arraybuffer');
+          const pdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
           currentPdfBlob = pdfBlob;
           zip.file(`${fileBaseName}.pdf`, pdfBlob);
         }
@@ -1671,7 +1674,8 @@ export default function App() {
               });
               const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
               pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
-              pdfBlobToUpload = pdfForUpload.output('blob');
+              const arrayBuffer = pdfForUpload.output('arraybuffer');
+              pdfBlobToUpload = new Blob([arrayBuffer], { type: 'application/pdf' });
             }
 
             const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
@@ -1766,7 +1770,8 @@ export default function App() {
             });
             const jpegData = canvas.toDataURL('image/jpeg', pdfQuality);
             pdfForUpload.addImage(jpegData, 'JPEG', 0, 0, 297, 210, undefined, 'NONE');
-            const pdfBlobToUpload = pdfForUpload.output('blob');
+            const arrayBuffer = pdfForUpload.output('arraybuffer');
+            const pdfBlobToUpload = new Blob([arrayBuffer], { type: 'application/pdf' });
 
             const cleanName = attendee.name.replace(/[^a-zA-Z0-9]/g, '_') || 'cert';
             const fileName = `${attendee.id}_${cleanName}.pdf`;
